@@ -1,5 +1,53 @@
 #!/bin/bash
 
+
+usage() {
+	echo -e ""
+	echo -e "check_mysql_galera.sh: Monitor MySQL/MariaDB Galera cluster"
+	echo -e -e ""
+	echo -e "Usage: check_mysql_galera.sh <options>"
+	echo -e ""
+	echo -e "Available options:"
+	echo -e ""
+	echo -e "   --host     Hostname to connect to            (MANDATORY)"
+	echo -e "   --user     User to connect as                (MANDATORY)"
+	echo -e "   --password User's password to use to connect (MANDATORY)"
+	echo -e "   --command  <command>                         (MANDATORY)"
+	echo -e "              Available commands:"
+	echo -e "              cluster-status   Check state of this host component"
+	echo -e "              mysql-connected  Check host is connected to cluster"
+	echo -e "              cluster-size     Check number of cluster hosts"
+	echo -e "                               Can be used with --warning or --critical"
+	echo -e "              thread-count     Total number of wsrep (applier/rollbacker) threads"
+	echo -e "              ready            Whether or not the Galera wsrep provider is ready"
+	echo -e "              synchronized     Whether or not the local and cluster nodes are in sync"
+	echo -e "   --help     Prints this help and exit"
+	echo -e "   --critical Number considered as critical limit for result command"
+	echo -e "              'cluster-size'"
+	echo -e "   --warning  Number considered as a warning limit for result command"
+	echo -e "              'cluster-size'"
+	echo -e ""
+	echo -e "Examples:"
+	echo -e ""
+	echo -e "    Check Galera cluster is ready:"
+	echo -e "    $0 --host localhost --user mysql_user --password s3cr3T --command ready"
+	echo -e ""
+	echo -e "    Check Galera cluster size is at least 9 nodes. Report warning is under:"
+	echo -e "    $0 --host localhost --user mysql_user --password s3cr3T --command cluster-size --warning 9"
+	echo -e ""
+	echo -e "Authors: Originally written by Sander Petersson (https://github.com/linpopilan)"
+	echo -e "         Updated by Emmanuel Quevillon (https://github.com/horkko)"
+	echo -e ""
+}
+
+error() {
+	local err
+	err=$1
+	echo -e "check_mysql_galera: ERROR: ${err}" 1>&2
+	echo -e "Try check_mysql_galera --help to get more help"        1>&2
+	exit 1
+}
+
 mysqlconnect () {
 
 	mysql -h $HOST -u $USER --password="$PASSWORD" -s -B -N -e "$1" | sed -e 's/[[:space:]]\{1,\}/,/g' | cut -d"," -f2
@@ -13,22 +61,22 @@ checkquery () {
 
 		case $value in
 			Primary )
-				echo "Status: $value"
+				echo -e "Status: $value"
 				exit 0
 				;;
 
 			NON_PRIMARY )
-				echo "Status: $value"
+				echo -e "Status: $value"
 				exit 2
 				;;
 
 			DISCONNECTED )
-				echo "Status: $value"
+				echo -e "Status: $value"
 				exit 2
 				;;
 
 			* )
-				echo "Status: $value"
+				echo -e "Status: $value"
 				exit 3
 				;;
 		esac
@@ -39,15 +87,15 @@ checkquery () {
 
 		case $value in
 			ON )
-				echo "Status: $value"
+				echo -e "Status: $value"
 				exit 0
 				;;
 			OFF )
-				echo "Status: $value"
+				echo -e "Status: $value"
 				exit 2
 				;;
 			* )
-				echo "Status: $value"
+				echo -e "Status: $value"
 				exit 3
 				;;
 		esac
@@ -57,13 +105,13 @@ checkquery () {
 		value=$(mysqlconnect "SHOW STATUS LIKE 'wsrep_cluster_size';")
 
 		if [[ $value -le $CRITICAL ]]; then
-			echo "CRITICAL! Number of nodes connected: $value"
+			echo -e "CRITICAL! Number of nodes connected: $value"
 			exit 2
 		elif [[ $value -le $WARNING ]]; then
-			echo "WARNING! Number of nodes connected: $value"
+			echo -e "WARNING! Number of nodes connected: $value"
 			exit 1
 		else
-			echo "OK! Number of nodes connected: $value"
+			echo -e "OK! Number of nodes connected: $value"
 			exit 0
 		fi
 	}
@@ -72,10 +120,10 @@ checkquery () {
 		value=$(mysqlconnect "SHOW STATUS LIKE 'wsrep_thread_count';")
 
 		if [[ $value -lt 0 ]]; then
-			echo "CRITICAL! Galera thread count: $value"
+			echo -e "CRITICAL! Galera thread count: $value"
 			exit 2
 		else
-			echo "OK! Galera thread count: $value"
+			echo -e "OK! Galera thread count: $value"
 			exit 0
 		fi
 	}
@@ -85,15 +133,28 @@ checkquery () {
 
 		case $value in
 			ON )
-				echo "OK! Galera provider is ready"
+				echo -e "OK! Galera provider is ready"
 				exit 0
 				;;
 			OFF)
-				echo "CRITICAL! Galera provider is not ready"
+				echo -e "CRITICAL! Galera provider is not ready"
 				exit 2
 				;;
 		esac
 
+	}
+
+	galera_cluster_synced () {
+		node_uuid=$(mysqlconnect "SHOW STATUS LIKE 'wsrep_local_state_uuid';")
+		cluster_uuid=$(mysqlconnect "SHOW STATUS LIKE 'wsrep_cluster_state_uuid';")
+		echo "Node=${node_uuid} / Cluster=${cluster_uuid}"
+		 if [ "${node_uuid}" = "${cluster_uuid}" ];then
+			 echo -e "OK! Node synchronized with cluster"
+			 exit 0
+		 else
+			 echo -e "CRITICAL! Node not synchronized with cluster"
+			 exit 1
+		 fi
 	}
 
 	case $1 in
@@ -112,11 +173,18 @@ checkquery () {
 		ready )
 			galera_ready
 			;;
+		synchronized )
+			galera_cluster_synced
+			;;
+		* )
+			error "Unsupported command $1"
 	esac
 
 }
 
-while [[ $# > 1 ]]; do
+[[ "${#}" = "0" ]] && echo -e "To get usage, try --help option." && exit 1
+
+while [[ $# > 0 ]]; do
 
 	key="$1"
 
@@ -145,7 +213,12 @@ while [[ $# > 1 ]]; do
 			CRITICAL="$2"
 			shift
 			;;
+		--help )
+			usage
+			exit 0
+			;;
 		* )
+			error "Unsupported options $key"
 			;;
 	esac
 	shift
