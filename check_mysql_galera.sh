@@ -54,7 +54,7 @@ check_connection() {
 		error "--user option must be set"
 	fi
 	if [ "${PASSWORD}" = "fakepass" ];then
-		echo -e "--password options must be set!"
+		error "--password options must be set!"
 	fi
 	mysql -h "${HOST}" -u "${USER}" --password="${PASSWORD}" -e "quit" || \
 		error "Can't connect to mysql server"
