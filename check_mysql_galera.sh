@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# Default values for variables
+HOST=""
+USER=""
+PASSWORD="fakepass"
+COMMAND=""
 
 usage() {
 	echo -e ""
@@ -40,18 +45,33 @@ usage() {
 	echo -e ""
 }
 
+# Checks that required mysql options are set
+check_connection() {
+	if [ "${HOST}" = "" ];then
+		error "--host option must be set"
+	fi
+	if [ "${USER}" = "" ];then
+		error "--user option must be set"
+	fi
+	if [ "${PASSWORD}" = "fakepass" ];then
+		echo -e "--password options must be set!"
+	fi
+	mysql -h "${HOST}" -u "${USER}" --password="${PASSWORD}" -e "quit" || \
+		error "Can't connect to mysql server"
+}
+
 error() {
 	local err
 	err=$1
 	echo -e "check_mysql_galera: ERROR: ${err}" 1>&2
-	echo -e "Try check_mysql_galera --help to get more help"        1>&2
+	echo -e "Try check_mysql_galera --help to get more help" 1>&2
 	exit 1
 }
 
 mysqlconnect () {
-
-	mysql -h $HOST -u $USER --password="$PASSWORD" -s -B -N -e "$1" | sed -e 's/[[:space:]]\{1,\}/,/g' | cut -d"," -f2
-
+	local cmd
+	cmd="${1}"
+	mysql -h "${HOST}" -u "${USER}" --password="${PASSWORD}" -s -B -N -e "${cmd}" | sed -e 's/[[:space:]]\{1,\}/,/g' | cut -d"," -f2
 }
 
 checkquery () {
@@ -147,14 +167,18 @@ checkquery () {
 	galera_cluster_synced () {
 		node_uuid=$(mysqlconnect "SHOW STATUS LIKE 'wsrep_local_state_uuid';")
 		cluster_uuid=$(mysqlconnect "SHOW STATUS LIKE 'wsrep_cluster_state_uuid';")
-		echo "Node=${node_uuid} / Cluster=${cluster_uuid}"
-		 if [ "${node_uuid}" = "${cluster_uuid}" ];then
-			 echo -e "OK! Node synchronized with cluster"
-			 exit 0
-		 else
-			 echo -e "CRITICAL! Node not synchronized with cluster"
-			 exit 1
-		 fi
+
+		if [ "${node_uuid}" = "" ] && [ "${cluster_uuid}" = "" ];then
+			echo "CRITICAL! Could not get UUID from node nor cluster"
+			exit 1
+		fi
+		if [ "${node_uuid}" = "${cluster_uuid}" ];then
+		  echo -e "OK! Node synchronized with cluster"
+		  exit 0
+		else
+		  echo -e "CRITICAL! Node not synchronized with cluster"
+		  exit 1
+		fi
 	}
 
 	case $1 in
@@ -177,40 +201,40 @@ checkquery () {
 			galera_cluster_synced
 			;;
 		* )
-			error "Unsupported command $1"
+			error "Unsupported command '$1'"
 	esac
 
 }
 
 [[ "${#}" = "0" ]] && echo -e "To get usage, try --help option." && exit 1
 
-while [[ $# > 0 ]]; do
+while [[ ${#} > 0 ]]; do
 
-	key="$1"
+	key="${1}"
 
 	case $key in
 		--host )
-			HOST="$2"
+			HOST="${2}"
 			shift
 			;;
 		--user )
-			USER="$2"
+			USER="${2}"
 			shift
 			;;
 		--password )
-			PASSWORD="$2"
+			PASSWORD="${2}"
 			shift
 			;;
 		--command )
-			checkquery $2
+			COMMAND="${2}"
 			shift
 			;;
 		--warning )
-			WARNING="$2"
+			WARNING="${2}"
 			shift
 			;;
 		--critical )
-			CRITICAL="$2"
+			CRITICAL="${2}"
 			shift
 			;;
 		--help )
@@ -218,9 +242,13 @@ while [[ $# > 0 ]]; do
 			exit 0
 			;;
 		* )
-			error "Unsupported options $key"
+			error "Unsupported option $key"
 			;;
 	esac
 	shift
 
 done
+
+{ check_connection && checkquery "${COMMAND}"; } || error "Can't run command ${COMMAND}"
+
+exit 0
