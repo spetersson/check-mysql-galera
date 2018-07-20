@@ -42,4 +42,5 @@ Authors: Originally written by Sander Petersson (https://github.com/linpopilan)
 # Authors
 
 Originally written by Sander Petersson (https://github.com/linpopilan)
+
 Updated by Emmanuel Quevillon (https://github.com/horkko)
